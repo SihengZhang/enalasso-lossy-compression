@@ -1,0 +1,21 @@
+# Build directories
+external/sz3-build/
+external/sz3-install/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+venv/
+.venv/
+
+# Output
+plots/*.png
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
