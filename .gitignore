@@ -1,6 +1,10 @@
 # Build directories
 external/sz3-build/
 external/sz3-install/
+external/zfp-build/
+external/zfp-install/
+external/SPERR-build/
+external/SPERR-install/
 
 # Python
 __pycache__/
@@ -19,3 +23,18 @@ plots/*.png
 
 # OS
 .DS_Store
+
+# LaTeX intermediate files
+LaTeX/*.aux
+LaTeX/*.log
+LaTeX/*.out
+LaTeX/*.toc
+LaTeX/*.bbl
+LaTeX/*.blg
+LaTeX/*.fdb_latexmk
+LaTeX/*.fls
+LaTeX/*.synctex.gz
+LaTeX/*.synctex(busy)
+LaTeX/*.nav
+LaTeX/*.snm
+LaTeX/*.vrb

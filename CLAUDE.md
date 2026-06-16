@@ -35,13 +35,44 @@ cd ../..
 # Or use Python API
 pip install pysz
 
+# Build and install zfp (CLI + zfpy Python bindings + OpenMP)
+# Requires: Cython + numpy (pip install Cython numpy)
+cmake -S external/zfp -B external/zfp-build \
+  -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PWD/external/zfp-install" \
+  -DBUILD_UTILITIES=ON -DBUILD_ZFPY=ON -DBUILD_TESTING=OFF -DZFP_WITH_OPENMP=ON \
+  -DPYTHON_EXECUTABLE="$(which python3)" \
+  '-DCMAKE_INSTALL_RPATH=$ORIGIN/../lib;$ORIGIN/../..' -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON
+cmake --build external/zfp-build -j"$(nproc)" && cmake --install external/zfp-build
+
+# Build and install SPERR (CLI + OpenMP). NOTE: -DCMAKE_INSTALL_LIBDIR=lib is
+# required so SPERR's RPATH resolves libSPERR.so (it sets RPATH before including
+# GNUInstallDirs, so the lib dir is otherwise empty).
+cmake -S external/SPERR -B external/SPERR-build \
+  -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PWD/external/SPERR-install" \
+  -DCMAKE_INSTALL_LIBDIR=lib -DBUILD_CLI_UTILITIES=ON -DBUILD_UNIT_TESTS=OFF -DUSE_OMP=ON
+cmake --build external/SPERR-build -j"$(nproc)" && cmake --install external/SPERR-build
+
+# zfp CLI + Python binding (zfpy)
+./external/zfp-install/bin/zfp --help
+export PYTHONPATH="$PWD/external/zfp-install/lib/python3.13/site-packages:$PYTHONPATH"
+python3 -c "import zfpy"   # zfpy.compress_numpy / decompress_numpy
+
+# SPERR CLI utilities (no native Python bindings; for Python use the hdf5plugin package)
+./external/SPERR-install/bin/sperr3d --help   # also: sperr2d, sperr3d_trunc
+
 # Run the turbulence statistics processing script
 python3 python_src/process_3dles.py
 ```
 
 ## Dependencies
 
-- [SZ3](https://github.com/szcompressor/SZ3) - Modular error-bounded lossy compression framework (submodule in `external/SZ3`)
+Three error-bounded lossy compressors are vendored as git submodules under `external/`
+(each builds into `external/<name>-build` and installs into `external/<name>-install`,
+both git-ignored):
+
+- [SZ3](https://github.com/szcompressor/SZ3) - Modular error-bounded lossy compression framework (`external/SZ3`)
+- [zfp](https://github.com/llnl/zfp) `1.0.1` - Transform-based compressor; `zfp` CLI + `zfpy` Python bindings (`external/zfp`)
+- [SPERR](https://github.com/NCAR/SPERR) `v0.8.5` - Wavelet-based compressor; `sperr2d`/`sperr3d` CLI, no native Python bindings (`external/SPERR`)
 
 ## Quick Reference: Derived Variables
 
