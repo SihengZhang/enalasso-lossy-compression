@@ -26,7 +26,7 @@ wpqvp = np.full((len(files),260),np.nan)
 
 for i in range(0,len(files)):
     dataset = nc.Dataset(files[i])
-    time[i] = dataset.variables['time'][:].astype(float).data 
+    time[i] = dataset.variables['time'][:].astype(float).data[0] 
     x = dataset.variables['x'][:].astype(float).data 
     y = dataset.variables['y'][:].astype(float).data 
     z = dataset.variables['z'][:].astype(float).data  

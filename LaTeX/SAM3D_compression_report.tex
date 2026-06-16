@@ -1,0 +1,349 @@
+\documentclass[11pt,a4paper]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{hyperref}
+\usepackage{siunitx}
+\usepackage{float}
+\usepackage{graphicx}
+\usepackage{xcolor}
+
+\geometry{margin=1in}
+
+\title{QoI-Preserving Lossy Compression for SAM3D Turbulence Data}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+We have applied Quantity-of-Interest (QoI) preserving lossy compression to SAM3D Large-Eddy Simulation (LES) data from the LASSO-ENA project. 
+Given 6 initial 3D data arrays and 9 derived QoI data arrays, we bound all 15 arrays with sepecified relative error bound only by compressing the 6 initial arrays with certain error bound.
+The 9 QoIs we consider include 5 bilinear QOIs, 3 quadratic variances, and 1 higher-order skewness.
+Since QPET fails when one initial data point is used to derive multiple QoI data points and it does not support bounding multiple QoIs, we only adopted its method to calculate point-wise error bound when compressing initial data arrays.
+While we successfully bound all initial arrays and QoI arrays, the overall compression ratio is relatively low(8.5x) even we used a loose error bound(1e-2).
+\end{abstract}
+
+
+%==============================================================================
+\section{Data Overview}
+%==============================================================================
+
+The data originates from the LASSO-ENA (Large-Eddy Simulation ARM Symbiotic Simulation and Observation -- Eastern North Atlantic) project, using the SAM (System for Atmospheric Modeling) model v6.10.3 with LASSO modifications.
+
+Six 3D variables are used for compression, each with shape $(N_z, N_y, N_x) = (260, 256, 256)$ and dtype \texttt{float32}:
+
+\begin{table}[H]
+\centering
+\caption{Primary 3D Variables for Compression}
+\begin{tabular}{llll}
+\toprule
+\textbf{Variable} & \textbf{Description} & \textbf{Units} & \textbf{Typical Range} \\
+\midrule
+$U$ & Zonal wind component & m/s & 3 -- 19 \\
+$V$ & Meridional wind component & m/s & $-22$ -- $-3$ \\
+$W$ & Vertical wind component & m/s & $-0.27$ -- 0.31 \\
+$PP$ & Pressure perturbation & Pa & $-0.72$ -- 0.84 \\
+$TABS$ & Absolute temperature & K & 240 -- 287 \\
+$QV$ & Water vapor mixing ratio & g/kg & 0.02 -- 7.9 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\noindent\textbf{Total timesteps}: 96
+
+\noindent\textbf{Dimension per array}: $(N_z, N_y, N_x) = (260, 256, 256)$
+
+\noindent\textbf{Memory footprint}: \SI{68.2}{\mega\byte} per variable (float32), \SI{408.9}{\mega\byte} per timestep for 6 variables, \SI{38.4}{\giga\byte} total for 96 timesteps
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.8\textwidth]{PP.png}
+\caption{Pressure perturbation of time step 1 $(N_z, N_y, N_x)=(260, 256, 256)$}
+\end{figure}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=0.9\textwidth]{turbstats.png}
+\caption{Turbulence statistics derived from 96 timesteps: velocity variances (uvar, vvar, wvar) and vertical velocity skewness (wskew)}
+\end{figure}
+
+%==============================================================================
+\section{Quantities of Interest (QoIs)}
+%==============================================================================
+
+\subsection{Mathematical Notations}
+
+\begin{table}[H]
+\centering
+\caption{Symbol Definitions}
+\begin{tabular}{ll}
+\toprule
+\textbf{Symbol} & \textbf{Description} \\
+\midrule
+$\phi$ & Generic field variable (e.g., $u$, $v$, $w$, $T$, $p$, $q_v$) \\
+$\overline{\phi}(z)$ & Horizontal mean of $\phi$ at height $z$ \\
+$\phi'$ & Turbulent perturbation ($\phi' = \phi - \overline{\phi}$) \\
+$\langle \cdot \rangle_{xy}$ & Horizontal averaging operator over $x$ and $y$ \\
+$N_x, N_y, N_z$ & Number of grid points in $x$, $y$, and $z$ directions \\
+$\sigma_w(z)$ & Standard deviation of vertical velocity at height $z$ \\
+$u', v', w'$ & Perturbations of velocity components \\
+$T', p', q_v'$ & Perturbations of temperature, pressure, and water vapor \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+All derived QoIs are based on Reynolds decomposition, separating each field $\phi$ into a horizontal mean and turbulent perturbation:
+\begin{equation}
+    \phi(x, y, z) = \overline{\phi}(z) + \phi'(x, y, z)
+\end{equation}
+where the overbar denotes horizontal averaging at each height level:
+\begin{equation}
+    \overline{\phi}(z) = \langle \phi \rangle_{xy} = \frac{1}{N_x N_y} \sum_{i,j} \phi(x_i, y_j, z)
+\end{equation}
+
+The perturbation is computed as:
+\begin{equation}
+    \phi' = \phi - \langle \phi \rangle_{xy}
+\end{equation}
+
+\subsection{Zonal Momentum Flux -- wpup (Bilinear)}
+\begin{equation}
+    \overline{w'u'}(z) = \langle w'(x,y,z) \cdot u'(x,y,z) \rangle_{xy}
+\end{equation}
+
+\subsection{Meridional Momentum Flux -- wpvp (Bilinear)}
+\begin{equation}
+    \overline{w'v'}(z) = \langle w'(x,y,z) \cdot v'(x,y,z) \rangle_{xy}
+\end{equation}
+
+\subsection{Pressure-Velocity Covariance -- wppp (Bilinear)}
+\begin{equation}
+    \overline{w'p'}(z) = \langle w'(x,y,z) \cdot p'(x,y,z) \rangle_{xy}
+\end{equation}
+
+\subsection{Sensible Heat Flux -- wptp (Bilinear)}
+\begin{equation}
+    \overline{w'T'}(z) = \langle w'(x,y,z) \cdot T'(x,y,z) \rangle_{xy}
+\end{equation}
+
+\subsection{Moisture Flux -- wpqvp (Bilinear)}
+\begin{equation}
+    \overline{w'q_v'}(z) = \langle w'(x,y,z) \cdot q_v'(x,y,z) \rangle_{xy}
+\end{equation}
+
+\subsection{Zonal Velocity Variance -- uvar (Quadratic)}
+\begin{equation}
+    \overline{u'^2}(z) = \langle u'(x,y,z)^2 \rangle_{xy}
+\end{equation}
+
+\subsection{Meridional Velocity Variance -- vvar (Quadratic)}
+\begin{equation}
+    \overline{v'^2}(z) = \langle v'(x,y,z)^2 \rangle_{xy}
+\end{equation}
+
+\subsection{Vertical Velocity Variance -- wvar (Quadratic)}
+\begin{equation}
+    \overline{w'^2}(z) = \langle w'(x,y,z)^2 \rangle_{xy} = \sigma_w^2(z)
+\end{equation}
+
+\subsection{Vertical Velocity Skewness -- wskew (Higher-Order)}
+\begin{equation}
+    S_w(z) = \left\langle \left(\frac{w'}{\sigma_w}\right)^3 \right\rangle_{xy} = \frac{\langle w'^3 \rangle_{xy}}{\sigma_w^3(z)}
+\end{equation}
+where $\sigma_w(z) = \sqrt{\overline{w'^2}(z)}$ is the standard deviation of vertical velocity at height $z$.
+
+\subsection{Summary of QoIs}
+
+\begin{table}[H]
+\centering
+\caption{Summary of Quantities of Interest}
+\begin{tabular}{llll}
+\toprule
+\textbf{QoI} & \textbf{Formula} & \textbf{Type} & \textbf{Dependent Fields} \\
+\midrule
+wpup & $\langle w'u' \rangle_{xy}$ & Bilinear & $W$, $U$ \\
+wpvp & $\langle w'v' \rangle_{xy}$ & Bilinear & $W$, $V$ \\
+wppp & $\langle w'p' \rangle_{xy}$ & Bilinear & $W$, $PP$ \\
+wptp & $\langle w'T' \rangle_{xy}$ & Bilinear & $W$, $TABS$ \\
+wpqvp & $\langle w'q_v' \rangle_{xy}$ & Bilinear & $W$, $QV$ \\
+uvar & $\langle u'^2 \rangle_{xy}$ & Quadratic & $U$ \\
+vvar & $\langle v'^2 \rangle_{xy}$ & Quadratic & $V$ \\
+wvar & $\langle w'^2 \rangle_{xy}$ & Quadratic & $W$ \\
+wskew & $\langle w'^3 \rangle_{xy} / \sigma_w^3$ & Cubic/Rational & $W$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Note that the $W$ field appears in all 9 QoIs, making it the most constrained field in QoI-preserving compression.
+
+\textcolor{red}{\textbf{Takeaway:} All QoIs are non-trivial functions because they are all non-linear, non operator-separable, and each single data point in the initial data array contributes to multiple QoIs.}
+
+%==============================================================================
+\section{Method}
+%==============================================================================
+
+\subsection{Input, Output, and Error Bounds}
+
+\textbf{Input files:} Six 3D binary arrays stored as raw float32 files:
+\begin{itemize}
+    \item \texttt{U\_260x256x256.raw}, \texttt{V\_260x256x256.raw}, \texttt{W\_260x256x256.raw}
+    \item \texttt{PP\_260x256x256.raw}, \texttt{TABS\_260x256x256.raw}, \texttt{QV\_260x256x256.raw}
+\end{itemize}
+
+\textbf{Input error bounds:} User specifies relative error bounds for:
+\begin{itemize}
+    \item 6 field arrays: $\epsilon_U, \epsilon_V, \epsilon_W, \epsilon_{PP}, \epsilon_{TABS}, \epsilon_{QV}$
+    \item 9 QoI arrays: $\tau_{wpup}, \tau_{wpvp}, \tau_{wppp}, \tau_{wptp}, \tau_{wpqvp}, \tau_{uvar}, \tau_{vvar}, \tau_{wvar}, \tau_{wskew}$
+\end{itemize}
+
+\textbf{Output files:} Six SZ3-compressed files with calculated absolute error bounds that satisfy both field and QoI constraints.
+
+\subsection{Point-wise Error Bound Derivation}
+
+Following the QPET framework, for a multivariate QoI function $F(x_1, \ldots, x_n)$ that is not in variable-separated format, we use its first-order Taylor approximation:
+\begin{equation}
+    F(x'_1, \ldots, x'_n) \approx F(x_1, \ldots, x_n) + \sum_i \frac{\partial F}{\partial x_i}(x_i)(x'_i - x_i)
+\end{equation}
+
+This reduces the multivariate QoI to a linear combination format $F = C + \sum_i \alpha_i f(x_i)$ where $\alpha_i = \frac{\partial F}{\partial x_i}$ and $f(x) = x$. The point-wise error bound for each data point is computed using:
+\begin{equation}
+    t = \frac{T}{\sum_i |\alpha_i|}
+\end{equation}
+where $T$ is the QoI error threshold. This deterministic bound guarantees that if each point-wise error $|D_i| \leq t$, then $|\sum_i \alpha_i D_i| \leq T$.
+
+\textcolor{red}{\textbf{Takeaway:} Since each single data point in the initial data array contributes to multiple QoIs, the simple edition approach in QPET (which corrects outliers after compression) is not applicable. Instead, we must hard-bound all data points during compression.}
+
+\subsection{Sequential Bound Calculation for Multiple QoIs}
+
+When bounding multiple QoIs that share common input fields, the \textbf{sequence of error bound calculation matters}. Consider our 9 QoIs where the $W$ field appears in all of them:
+
+\textbf{Problem:} The skewness QoI depends on $\sigma_w = \sqrt{\text{wvar}}$, so the wvar error must be known before computing the wskew bound. Similarly, bilinear QoIs like $\langle w'u' \rangle$ need the $W$ bound to allocate the remaining error budget to other fields.
+
+\textbf{Our approach:}
+\begin{enumerate}
+    \item \textbf{Step 1: Compute wvar bound first.} Since $\text{wvar} = \langle w'^2 \rangle_{xy}$ is quadratic in $W$, we derive:
+    \begin{equation}
+        \epsilon_W^{wvar} = \frac{\tau_{wvar} \cdot \text{range}(wvar)}{4 \cdot \max_z \langle |w'| \rangle}
+    \end{equation}
+
+    \item \textbf{Step 2: Compute wskew bound using known wvar error.} The skewness $S_w = \langle w'^3 \rangle / \sigma_w^3$ has per-datapoint partial derivatives:
+    \begin{equation}
+        \frac{\partial f_i}{\partial w'_i} = \frac{3(w'_i)^2}{\sigma^3}, \quad \frac{\partial f_i}{\partial(\sigma^2)} = -\frac{3(w'_i)^3}{2\sigma^5}
+    \end{equation}
+    The $\sigma^2$ term uses the known wvar error from Step 1.
+
+    \item \textbf{Step 3: Compute bilinear QoI bounds.} For $\langle w'\phi' \rangle$, with the $W$ bound already determined, we allocate the remaining error budget to the other field $\phi$:
+    \begin{equation}
+        \epsilon_\phi = \frac{\tau \cdot \text{range}(QoI) - 2\epsilon_W \cdot \max_z\langle|\phi'|\rangle}{2 \cdot \max_z\langle|w'|\rangle}
+    \end{equation}
+\end{enumerate}
+
+The final field error bound is the \textbf{minimum} across all QoI-derived bounds:
+\begin{equation}
+    \epsilon_W = \min(\epsilon_W^{user}, \epsilon_W^{wvar}, \epsilon_W^{wskew}, \epsilon_W^{wpup}, \epsilon_W^{wpvp}, \epsilon_W^{wppp}, \epsilon_W^{wptp}, \epsilon_W^{wpqvp})
+\end{equation}
+
+\textcolor{red}{\textbf{Takeaway:} When one initial data array is used in multiple QoIs, the sequence of processing QoIs to derive error bounds for the initial data array is crucial to the overall compression ratio.}
+
+%==============================================================================
+\section{Compression Results}
+%==============================================================================
+
+We evaluate QoI-preserving compression at three relative error bounds: $10^{-2}$, $10^{-3}$, and $10^{-4}$.
+
+\subsection{Relative Error Bound = $10^{-2}$}
+
+\begin{table}[H]
+\centering
+\caption{Compression Results ($\tau = 10^{-2}$)}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Field} & \textbf{Calculated Abs. Bound} & \textbf{Calculated Rel. Bound} & \textbf{Compression Ratio} \\
+\midrule
+$U$ & $6.17 \times 10^{-4}$ & $3.92 \times 10^{-5}$ & 24.32x \\
+$V$ & $1.86 \times 10^{-3}$ & $1.00 \times 10^{-4}$ & 30.09x \\
+$W$ & $1.93 \times 10^{-9}$ & $3.33 \times 10^{-9}$ & 1.89x \\
+$PP$ & $2.30 \times 10^{-4}$ & $1.47 \times 10^{-4}$ & 30.29x \\
+$TABS$ & $1.35 \times 10^{-4}$ & $2.86 \times 10^{-6}$ & 25.13x \\
+$QV$ & $6.50 \times 10^{-4}$ & $8.21 \times 10^{-5}$ & 35.46x \\
+\midrule
+\textbf{Overall} & -- & -- & \textbf{8.50x} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Relative Error Bound = $10^{-3}$}
+
+\begin{table}[H]
+\centering
+\caption{Compression Results ($\tau = 10^{-3}$)}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Field} & \textbf{Calculated Abs. Bound} & \textbf{Calculated Rel. Bound} & \textbf{Compression Ratio} \\
+\midrule
+$U$ & $6.17 \times 10^{-5}$ & $3.92 \times 10^{-6}$ & 11.26x \\
+$V$ & $1.86 \times 10^{-4}$ & $1.00 \times 10^{-5}$ & 13.87x \\
+$W$ & $1.95 \times 10^{-10}$ & $3.36 \times 10^{-10}$ & 1.37x \\
+$PP$ & $2.30 \times 10^{-5}$ & $1.47 \times 10^{-5}$ & 10.68x \\
+$TABS$ & $1.35 \times 10^{-5}$ & $2.86 \times 10^{-7}$ & 10.02x \\
+$QV$ & $6.50 \times 10^{-5}$ & $8.21 \times 10^{-6}$ & 17.81x \\
+\midrule
+\textbf{Overall} & -- & -- & \textbf{5.26x} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Relative Error Bound = $10^{-4}$}
+
+\begin{table}[H]
+\centering
+\caption{Compression Results ($\tau = 10^{-4}$)}
+\begin{tabular}{lccc}
+\toprule
+\textbf{Field} & \textbf{Calculated Abs. Bound} & \textbf{Calculated Rel. Bound} & \textbf{Compression Ratio} \\
+\midrule
+$U$ & $6.17 \times 10^{-6}$ & $3.92 \times 10^{-7}$ & 4.83x \\
+$V$ & $1.86 \times 10^{-5}$ & $1.00 \times 10^{-6}$ & 6.09x \\
+$W$ & $1.94 \times 10^{-11}$ & $3.36 \times 10^{-11}$ & 1.15x \\
+$PP$ & $2.30 \times 10^{-6}$ & $1.47 \times 10^{-6}$ & 4.85x \\
+$TABS$ & $1.35 \times 10^{-6}$ & $2.86 \times 10^{-8}$ & 10.20x \\
+$QV$ & $6.50 \times 10^{-6}$ & $8.21 \times 10^{-7}$ & 9.18x \\
+\midrule
+\textbf{Overall} & -- & -- & \textbf{3.63x} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Summary}
+
+\begin{table}[H]
+\centering
+\caption{Overall Compression Ratio vs. Relative Error Bound}
+\begin{tabular}{cc}
+\toprule
+\textbf{Relative Error Bound} & \textbf{Overall Compression Ratio} \\
+\midrule
+$10^{-2}$ & 8.50x \\
+$10^{-3}$ & 5.26x \\
+$10^{-4}$ & 3.63x \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The $W$ field is the bottleneck, requiring extremely tight absolute error bounds ($\sim 10^{-9}$ to $10^{-11}$) to satisfy the wskew and wvar QoI constraints. This results in minimal compression for $W$ (1.15x--1.89x), which limits the overall compression ratio.
+
+\textcolor{red}{\textbf{Takeaway:} The $W$ data array (z-velocity) is over-bounded because of the complexity of wskewness, which requires a better method to get the error back-propagated to the original data array.}
+
+\subsection{QoI Comparison}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=\textwidth]{qoi_comparison.png}
+\caption{Comparison of 9 QoIs computed from original data vs. compressed/decompressed data (relative error bound = $10^{-3}$). Each QoI is a 1D profile of length $N_z = 260$. Blue: original, Red dashed: compressed. All QoIs from original data and compressed data are almost identical, which indicates over conservative errror bounds}
+\end{figure}
+
+\end{document}
