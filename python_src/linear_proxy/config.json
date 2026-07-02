@@ -1,0 +1,43 @@
+{
+  "_comment": "linear_proxy configuration (PyTorch full-plane engine), read by demo.py via load_config(). Standard JSON: documentation lives in ignored '_comment*' keys.",
+
+  "engine": {
+    "_comment": "Bound engine settings. QoI variables are the data points of an entire x-y plane of the raw fields (n=65536 for a 256x256 plane; doubled for bilinear QoIs).",
+    "_comment_method": "'structured' = O(N) closed-form/low-rank bound (full plane); 'dense' = brute-force torch.func.hessian + box sampling (small planes only, for cross-validation).",
+    "_comment_device": "'cuda' (2x RTX A6000) or 'cpu'; auto-falls back to cpu if CUDA is unavailable.",
+    "_comment_dtype": "Bounds are always computed in float64 for rigor; this key is informational.",
+    "_comment_sigma2_floor": "wskew bound raises if the box could drive block variance sigma^2 below this (Hessian singularity).",
+    "method": "structured",
+    "device": "cuda",
+    "dtype": "float64",
+    "sigma2_floor": 1e-12
+  },
+
+  "validation": {
+    "_comment": "Monte-Carlo: draw 'samples' uniform points in the box and check |F-g| <= t.",
+    "samples": 10000,
+    "seed": 0
+  },
+
+  "driver": {
+    "_comment": "CLI driver defaults; each is overridable on the command line.",
+    "_comment_data": "Directory of {FIELD}_*.raw files, or a .nc file; null -> synthetic field.",
+    "_comment_zlevel": "Height index of the (y, x) plane to analyze.",
+    "_comment_abs_eb": "Compression ABSOLUTE error bound on the field data points (uniform E).",
+    "_comment_run_self_tests": "Run self-tests + cross-validation before the driver.",
+    "qoi": "wskew",
+    "data": null,
+    "zlevel": 5,
+    "abs_eb": 0.001,
+    "run_self_tests": true
+  },
+
+  "synthetic": {
+    "_comment": "Synthetic field plane used when driver.data is null.",
+    "_comment_size": "Generates a (size x size) plane -> N = size^2 variables.",
+    "_comment_skew": "Positive-skewness injection strength.",
+    "size": 256,
+    "seed": 0,
+    "skew": 0.4
+  }
+}
